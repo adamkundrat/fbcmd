@@ -119,6 +119,7 @@
   AddPreference('appsecret','88af69b7ab8d437bff783328781be79b');
   AddPreference('auth_auto_launch','1');
   AddPreference('auto_mkdir','1');
+  AddPreference('cache_fetchsize','100');
   AddPreference('csv_bookend','"');
   AddPreference('csv_escaped_bookend','""');
   AddPreference('csv_force_bookends','0','csvf');
@@ -340,6 +341,7 @@
   AddCommand('ALLINFO',   'flist~List all available profile information for friend(s)');
   AddCommand('APICS',     'album_id [savedir]~List [and optionally save] all photos from an album');
   AddCommand('AUTH',      'authcode~Sets your facebook authorization code');
+  AddCommand('CACHE',     '<no parameters>~Update your saved Cache of friends, pages, groups, etc.');
   AddCommand('COMMENT',   'post_id text~Add a comment to a story that appears in the stream');
   AddCommand('DELPOST',   'post_id~Deletes a post from your stream');
   AddCommand('DISPLAY',   'fbml~Sets the content of your FBCMD profile box');
@@ -795,6 +797,16 @@
           SavePhoto(PhotoSrc($pic),$pic,'0',$fbcmdParams[2],$fbcmdPrefs['apics_filename']);
         }
       }
+    }
+  }
+
+////////////////////////////////////////////////////////////////////////////////
+
+  if ($fbcmdCommand == 'CACHE') {
+    ValidateParamCount(0);
+    GetCoreFriendData();
+    foreach ($dataFriendId as $fid) {
+      print $fid['uid2'] . " " . ProfileName($fid['uid2']) . "\n";
     }
   }
 
@@ -2442,6 +2454,103 @@
       // }
     }
   }
+
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+
+  function GetCoreFriendData() {
+    global $fbcmdPrefs;
+    global $fbUser;
+    global $dataFriendId;
+    global $fqlFriendBaseInfo;
+    
+    $dataFriendId = array();
+    
+    $iteration = 7;
+    $isContinue = true;
+    while ($isContinue) {
+      $startNum = $iteration * $fbcmdPrefs['cache_fetchsize'];
+      print "Fetching Friends [{$startNum}-" . ($startNum + $fbcmdPrefs['cache_fetchsize'] - 1) . "]\n";
+
+      $GLOBALS['fqlFriendId' . $iteration] = "SELECT uid2 FROM friend WHERE uid1={$fbUser} AND uid2=uid2 LIMIT $startNum,{$fbcmdPrefs['cache_fetchsize']}";
+      $fqlFriendBaseInfo = "SELECT uid,first_name,last_name,name,username,birthday_date FROM user WHERE uid IN (SELECT uid2 FROM #fqlFriendId{$iteration})";
+      MultiFQL(array('FriendId' . $iteration, 'FriendBaseInfo'));
+      
+      if (!$GLOBALS['dataFriendId' . $iteration]) {
+        $isContinue = false;
+      } else {
+        array_merge_unique($dataFriendId,$GLOBALS['dataFriendId' . $iteration]);
+      }
+      $iteration++;
+    }
+
+    
+  // $fqlFriendId = "SELECT uid2 FROM friend WHERE uid1={$fbUser} AND uid2=uid2";
+  // $fqlFriendBaseInfo = "SELECT uid,first_name,last_name,name,username,birthday_date,online_presence,status FROM user WHERE uid IN (SELECT uid2 FROM #fqlFriendId) OR uid={$fbUser}";
+  // $keyFriendBaseInfo = 'uid';
+  // $fqlFriendListNames = "SELECT flid,name FROM friendlist WHERE owner={$fbUser}";
+  // $keyFriendListNames = 'flid';
+  // $fqlFriendListMembers = "SELECT flid,uid FROM friendlist_member WHERE flid IN (SELECT flid FROM #fqlFriendListNames)";
+  // $fqlPageId = "SELECT page_id FROM page_fan WHERE uid={$fbUser}";
+  // $fqlPageNames = "SELECT page_id,name,username FROM page WHERE page_id IN (SELECT page_id FROM #fqlPageId)";
+  // $keyPageNames = 'page_id';
+  // $fqlGroupNames = "SELECT gid,name FROM group WHERE gid IN (SELECT gid FROM group_member WHERE uid={$fbUser})";
+  // $keyGroupNames = 'gid';
+  
+  
+  
+  
+  
+  }
+  
+  function NewMultiFQL($queryList) {
+
+    // This Function wraps the MultiQuery() API function in a non-obvious but convenient way:
+    //
+    // MultiFQL(array('Query1','Query2'))
+    //
+    // requires the global variables:
+    //
+    // $fqlQuery1 = "SELECT ...."
+    // $fqlQuery2 = "SELECT x FROM y WHERE x IN (SELECT z FROM #fqlQuery1)"
+    //
+    // and generates the global variables $dataQuery1 and $dataQuery2
+    // also, if $keyQuery1 is defined, then an associative array $indexQuery1 is generated
+
+    global $fbObject;
+
+    $queryStrings = Array();
+    foreach ($queryList as $queryName) {
+      $queryStrings[] = '"fql' . $queryName . '":"' . $GLOBALS['fql' . $queryName] . '"';
+    }
+    try {
+      $fbMultiFqlReturn = $fbObject->api_client->fql_multiquery("{" . implode(',',$queryStrings) . "}");
+      TraceReturn($fbMultiFqlReturn);
+    } catch (Exception $e) {
+      FbcmdException($e,'MultiFQL');
+    }
+    if ($fbMultiFqlReturn) {
+      for ($i=0; $i < count($queryList); $i++) {
+        foreach ($fbMultiFqlReturn as $ret) {
+          if ($ret['name'] == 'fql' . $queryList[$i]) {
+            $GLOBALS['data' . $queryList[$i]] = $ret['fql_result_set'];
+            if (isset($GLOBALS['key' . $queryList[$i]])) {
+              $GLOBALS['index' . $queryList[$i]] = Array();
+              if ((is_array($ret['fql_result_set']))&&(count($ret['fql_result_set'] > 0))) {
+                foreach ($ret['fql_result_set'] as $record) {
+                  $GLOBALS['index' . $queryList[$i]][$record[$GLOBALS['key' . $queryList[$i]]]] = $record;
+                }
+              }
+            }
+          }
+        }
+      }
+    } else {
+      FbcmdFatalError('Unexpected: MultiFQL Empty');
+    }
+  }
+  
+
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////

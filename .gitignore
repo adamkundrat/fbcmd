@@ -7,3 +7,4 @@ sessionkeys.txt
 package/msi/*.msi
 package/zip/*.zip
 support/test_php_output.txt
+*.scc
